@@ -143,16 +143,17 @@ def collect(headers):
 REPLY_TEXT = "Checked in — Samuel Hart (posted by my scheduled check-in bot)."
 
 # Compiled once at import; is_check_in() runs it against every post title
-# on every run.
-CHECK_IN_PATTERN = re.compile(r"\bcheck-in\b", re.IGNORECASE)
+# on every run. The s? makes the trailing s optional, so plural titles
+# ("weekly check-ins") match too.
+CHECK_IN_PATTERN = re.compile(r"\bcheck-ins?\b", re.IGNORECASE)
 
 
 def is_check_in(post):
     # A check-in is recognized purely by its title: the word "check-in"
-    # somewhere in it, e.g. "Aug 21th check-in" or "check-in for Sept 8".
-    # The \b word boundaries mean only the whole word matches — a title
-    # like "check-index for class" is NOT a check-in — and IGNORECASE
-    # covers "Check-In", "CHECK-IN", etc.
+    # (or its plural "check-ins") somewhere in it, e.g. "Aug 21th check-in"
+    # or "check-in for Sept 8". The \b word boundaries mean only the whole
+    # word matches — a title like "check-index for class" is NOT a
+    # check-in — and IGNORECASE covers "Check-In", "CHECK-IN", etc.
     return CHECK_IN_PATTERN.search(post["title"]) is not None
 
 
