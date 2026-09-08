@@ -103,10 +103,39 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add artifact/
+
           # A re-run where the instructor posted nothing new has nothing
-          # to commit — git exits non-zero there, which would fail the
-          # run, so catch it and let the step pass as a no-op. The
-          # [skip ci] tag also tells GitHub to never launch workflows
-          # from this push.
-          git commit -m "Update artifact: $(date -u +%Y-%m-%d) run [skip ci]" || echo "No artifact changes to commit"
+          # staged. git diff --staged --quiet exits 0 exactly then, so
+          # skip the commit AND the push — a clean run should leave the
+          # repo untouched instead of pushing a no-op.
+          if git diff --staged --quiet; then
+            echo "No artifact changes to commit"
+            exit 0
+          fi
+
+          git commit -m "Update artifact: $(date -u +%Y-%m-%d) run [skip ci]"
+
+          # main may have moved since our checkout — a hand-pushed commit,
+          # or an artifact commit from a run that finished while this one
+          # was waiting on the concurrency group. Replaying our one
+          # artifact commit on top of the latest remote state is what
+          # makes the push below land instead of being rejected with
+          # "fetch first".
+          if ! git pull --rebase origin main; then
+            # A conflict can only be inside artifact/ — the only path the
+            # bot ever commits — and this run regenerated the whole
+            # folder, so our copy is the freshest. Undo the tangled
+            # rebase, snap to the latest remote state, and replace its
+            # artifact with an exact copy of ours before committing again.
+            git rebase --abort
+            OUR_COMMIT=$(git rev-parse HEAD)
+            git reset --hard origin/main
+            git rm -r -q --ignore-unmatch artifact/
+            git checkout "$OUR_COMMIT" -- artifact/
+            git commit -m "Update artifact: $(date -u +%Y-%m-%d) run (rebased) [skip ci]"
+          fi
+
+          # [skip ci] in the messages above tells GitHub to never launch
+          # workflows from these pushes, so the bot's own commits cannot
+          # trigger the bot again.
           git push
