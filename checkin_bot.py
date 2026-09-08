@@ -18,6 +18,7 @@ Both tasks run on every schedule tick.
 import json
 import os
 import re
+import shutil
 import sys
 
 import requests
@@ -120,7 +121,12 @@ def collect(headers):
     # list gives us the ids; each post is then re-fetched in full and its
     # attachments pulled down. Returns the list of full post dicts that
     # end up in collected.json.
-    os.makedirs(FILES_DIR, exist_ok=True)  # both json and downloaded files land under here
+    #
+    # Wipe last run's downloads before refilling: the artifact should
+    # mirror the instructor's currently visible posts exactly, so a file
+    # whose post was deleted must not linger from an earlier run.
+    shutil.rmtree(FILES_DIR, ignore_errors=True)  # no error if it isn't there yet
+    os.makedirs(FILES_DIR)
     collected = []
     for post in list_instructor_posts(headers):
         # If a post is deleted between listing it and fetching it, skip it
