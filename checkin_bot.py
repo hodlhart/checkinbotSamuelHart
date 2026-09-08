@@ -17,6 +17,7 @@ Both tasks run on every schedule tick.
 
 import json
 import os
+import re
 import sys
 
 import requests
@@ -141,14 +142,18 @@ def collect(headers):
 # instructor tallying replies knows a real student's bot wrote it.
 REPLY_TEXT = "Checked in — Samuel Hart (posted by my scheduled check-in bot)."
 
+# Compiled once at import; is_check_in() runs it against every post title
+# on every run.
+CHECK_IN_PATTERN = re.compile(r"\bcheck-in\b", re.IGNORECASE)
+
 
 def is_check_in(post):
     # A check-in is recognized purely by its title: the word "check-in"
     # somewhere in it, e.g. "Aug 21th check-in" or "check-in for Sept 8".
-    # lower() makes the match case-insensitive; matching the whole word
-    # (with the hyphen) keeps ordinary posts like "checkout my project"
-    # from being mistaken for one.
-    return "check-in" in post["title"].lower()
+    # The \b word boundaries mean only the whole word matches — a title
+    # like "check-index for class" is NOT a check-in — and IGNORECASE
+    # covers "Check-In", "CHECK-IN", etc.
+    return CHECK_IN_PATTERN.search(post["title"]) is not None
 
 
 def list_comments(headers, post_id):
@@ -169,6 +174,12 @@ def already_replied(comments, my_id):
 def reply_to_check_in(headers, post, my_id):
     # POST /api/v1/posts/{id}/comments — adds a comment; the server answers
     # 201 on success. Returns True only when a new reply actually landed.
+    #
+    # Known race: another process could post a reply between the duplicate
+    # check below and our POST, and we would end up commenting twice. That
+    # is acceptable — the workflow's concurrency group means two of our runs
+    # never actually overlap, and the next run's already_replied check is
+    # the safety net that keeps any slip from repeating.
     if already_replied(list_comments(headers, post["id"]), my_id):
         print(f"  [{post['id']}] {post['title']} — already replied, skipping")
         return False
@@ -197,7 +208,19 @@ def handle_check_ins(headers, posts, my_id):
     # can ever be reached from here. Returns how many new replies landed.
     check_ins = [post for post in posts if is_check_in(post)]
     print(f"Found {len(check_ins)} check-in post(s) among them")
-    return sum(reply_to_check_in(headers, post, my_id) for post in check_ins)
+    replied = 0
+    for post in check_ins:
+        # A network failure on one check-in must not crash the run: this
+        # loop still has Task 1's artifact waiting to be committed, and the
+        # next scheduled run retries this post anyway. RequestException is
+        # requests' base class, so it covers connection drops and any
+        # raise_for_status() failure alike.
+        try:
+            if reply_to_check_in(headers, post, my_id):
+                replied += 1
+        except requests.RequestException as err:
+            print(f"  [{post['id']}] {post['title']} — reply failed, skipping: {err}")
+    return replied
 
 
 def main():
