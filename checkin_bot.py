@@ -39,7 +39,9 @@ FILES_DIR = os.path.join(ARTIFACT_DIR, "files")
 def whoami(headers):
     # GET /api/v1/me — returns the account that owns the token. One cheap
     # call to prove auth works before we try anything else.
-    resp = requests.get(f"{API_URL}/api/v1/me", headers=headers)
+    # Every call in this file passes timeout=30 — without it a hung API
+    # would stall the run until the job's own timeout kills it.
+    resp = requests.get(f"{API_URL}/api/v1/me", headers=headers, timeout=30)
     resp.raise_for_status()  # raise HTTPError on 4xx/5xx instead of continuing with an error response
     return resp.json()
 
@@ -55,6 +57,7 @@ def list_instructor_posts(headers):
             f"{API_URL}/api/v1/posts",
             headers=headers,
             params={"author": INSTRUCTOR_ID, "limit": PAGE_SIZE, "offset": offset},
+            timeout=30,
         )
         resp.raise_for_status()  # raise HTTPError on 4xx/5xx instead of continuing with an error response
         page = resp.json()
@@ -71,7 +74,7 @@ def get_post(headers, post_id):
     # endpoint is the one that could hand back truncated bodies, so every
     # post we archive gets re-fetched on its own to guarantee the complete
     # body made it into the artifact.
-    resp = requests.get(f"{API_URL}/api/v1/posts/{post_id}", headers=headers)
+    resp = requests.get(f"{API_URL}/api/v1/posts/{post_id}", headers=headers, timeout=30)
     resp.raise_for_status()  # raise HTTPError on 4xx/5xx instead of continuing with an error response
     return resp.json()
 
@@ -86,13 +89,16 @@ def attachment_url(att):
 
 def download_attachments(headers, post):
     # GET each attachment's download_url — returns the raw file bytes with
-    # its content type, not JSON. Every file is saved under its original
-    # filename (what the graded artifact expects), writing in binary mode
-    # because the bytes could be anything (image, PDF, zip...).
+    # its content type, not JSON. Writing in binary mode because the bytes
+    # could be anything (image, PDF, zip...). Each file is saved as
+    # {post_id}_{filename}: the post-id prefix keeps same-named attachments
+    # on different posts from overwriting each other, and basename() strips
+    # any directory components the server might put in the name.
     for att in post.get("attachments", []):
-        resp = requests.get(attachment_url(att), headers=headers)
+        resp = requests.get(attachment_url(att), headers=headers, timeout=30)
         resp.raise_for_status()  # raise HTTPError on 4xx/5xx instead of continuing with an error response
-        with open(os.path.join(FILES_DIR, att["filename"]), "wb") as fh:
+        safe_name = f"{post['id']}_{os.path.basename(att['filename'])}"
+        with open(os.path.join(FILES_DIR, safe_name), "wb") as fh:
             fh.write(resp.content)
 
 
