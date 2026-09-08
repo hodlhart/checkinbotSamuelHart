@@ -9,9 +9,10 @@ on a cron schedule. Two jobs:
   Task 1: archive every instructor post into artifact/ (collected.json with
           the full title/body/tags/timestamps, plus every attachment
           downloaded into artifact/files/).
-  Task 2: reply to each check-in post inside its open window (next step).
+  Task 2: reply to each of the instructor's check-in posts — but only inside
+          the server-enforced reply window, and only once per check-in.
 
-This version does Task 1 end to end.
+Both tasks run on every schedule tick.
 """
 
 import json
@@ -136,6 +137,69 @@ def collect(headers):
     return collected
 
 
+# What the bot says when it checks in. Short and clearly automated, so the
+# instructor tallying replies knows a real student's bot wrote it.
+REPLY_TEXT = "Checked in — Samuel Hart (posted by my scheduled check-in bot)."
+
+
+def is_check_in(post):
+    # A check-in is recognized purely by its title: the word "check-in"
+    # somewhere in it, e.g. "Aug 21th check-in" or "check-in for Sept 8".
+    # lower() makes the match case-insensitive; matching the whole word
+    # (with the hyphen) keeps ordinary posts like "checkout my project"
+    # from being mistaken for one.
+    return "check-in" in post["title"].lower()
+
+
+def list_comments(headers, post_id):
+    # GET /api/v1/posts/{id}/comments — returns that post's comments as a
+    # JSON list, oldest first.
+    resp = requests.get(f"{API_URL}/api/v1/posts/{post_id}/comments", headers=headers, timeout=30)
+    resp.raise_for_status()  # raise HTTPError on 4xx/5xx instead of continuing with an error response
+    return resp.json()
+
+
+def already_replied(comments, my_id):
+    # True if one of the existing comments was written by us. The bot runs
+    # every couple of hours, so without this check a re-run would reply to
+    # the same check-in twice.
+    return any(comment.get("author_id") == my_id for comment in comments)
+
+
+def reply_to_check_in(headers, post, my_id):
+    # POST /api/v1/posts/{id}/comments — adds a comment; the server answers
+    # 201 on success. Returns True only when a new reply actually landed.
+    if already_replied(list_comments(headers, post["id"]), my_id):
+        print(f"  [{post['id']}] {post['title']} — already replied, skipping")
+        return False
+
+    resp = requests.post(
+        f"{API_URL}/api/v1/posts/{post['id']}/comments",
+        headers=headers,
+        json={"body": REPLY_TEXT},
+        timeout=30,
+    )
+    if resp.status_code == 423:
+        # 423 Locked: this check-in only accepts replies inside a time
+        # window, and it is shut right now (too early or too late). That
+        # is routine — not a failure — so leave the run green and let the
+        # next scheduled run catch the window open instead.
+        print(f"  [{post['id']}] {post['title']} — window closed (423), will retry next run")
+        return False
+    resp.raise_for_status()  # any other 4xx/5xx IS a real failure
+    print(f"  [{post['id']}] {post['title']} — replied")
+    return True
+
+
+def handle_check_ins(headers, posts, my_id):
+    # Task 2: reply to each of the instructor's check-in posts. The posts
+    # passed in are already instructor-only, so no other student's posts
+    # can ever be reached from here. Returns how many new replies landed.
+    check_ins = [post for post in posts if is_check_in(post)]
+    print(f"Found {len(check_ins)} check-in post(s) among them")
+    return sum(reply_to_check_in(headers, post, my_id) for post in check_ins)
+
+
 def main():
     token = os.environ.get("PRACTICE_API_TOKEN")
     if not token:
@@ -157,6 +221,9 @@ def main():
         f"Archived {len(collected)} post(s) to {ARTIFACT_DIR}/collected.json "
         f"and {len(os.listdir(FILES_DIR))} file(s) to {FILES_DIR}/"
     )
+
+    replied = handle_check_ins(headers, collected, me["id"])
+    print(f"Replied to {replied} check-in(s) this run")
 
 
 if __name__ == "__main__":
