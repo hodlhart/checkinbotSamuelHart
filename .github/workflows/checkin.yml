@@ -1,0 +1,76 @@
+# Runs the Scheduled Check-In Bot automatically, so it can act on a
+# schedule even when nobody is at the keyboard.
+#
+# Two things have to be true for this to work:
+#   1. GitHub has to start it for us   -> the `schedule` trigger below
+#   2. it has to reach the API as me   -> the PRACTICE_API_TOKEN secret,
+#      which the `env:` block passes into the script's environment
+
+name: Scheduled Check-In Bot
+
+# `on:` lists every event that is allowed to start this workflow.
+on:
+  # `schedule` runs the workflow on a timetable, GitHub's side.
+  schedule:
+    # GitHub cron expressions have five fields, all in UTC:
+    #   minute  hour  day-of-month  month  day-of-week
+    # "41 */2 * * *" = minute 41, every 2nd hour, every day of every month.
+    #
+    # Why every 2 hours: check-in posts only accept replies inside a time
+    # window, and the API never tells us when that window opens — it just
+    # rejects replies with 423 when it is closed. Running often means the
+    # bot never goes more than ~2 hours without looking, so any window
+    # longer than that is guaranteed to be caught.
+    #
+    # Why minute 41 and not 0: GitHub runs every user's cron on the same
+    # clocks, so :00 minutes are crowded and delayed. An off-peak minute
+    # makes delayed starts less likely.
+    #
+    # (UTC is 5-6 hours ahead of Central time, so these fire at odd local
+    # hours — that is fine, the bot does the checking for us.)
+    - cron: "41 */2 * * *"
+
+  # `workflow_dispatch` adds a "Run workflow" button on the Actions tab,
+  # so the same job can also be started by hand — for testing a change
+  # without waiting for the next scheduled slot.
+  workflow_dispatch:
+
+# Least privilege: the job gets write access to the repo contents (the
+# bot commits its artifact/ folder back to this repository) and nothing else.
+permissions:
+  contents: write
+
+jobs:
+  checkin:
+    # GitHub-hosted virtual machine the steps below run on.
+    runs-on: ubuntu-latest
+
+    steps:
+      # Clones this repository into the runner, so the script and the
+      # workflow file itself are on disk for later steps.
+      - uses: actions/checkout@v4
+
+      # Installs Python on the runner — the VM is otherwise bare.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # Installs the dependencies the script imports (just `requests`
+      # for now) from the committed requirements list.
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      # Runs the bot. The secrets never appear in this file — they are
+      # stored under Settings → Secrets and variables → Actions, and
+      # `${{ secrets.NAME }}` substitutes them in only at run time.
+      # Mapping them into `env:` hands them to the script the same way
+      # an exported shell variable would, so the code reads them with
+      # plain os.environ.get() and the token never gets committed.
+      # GitHub also masks secret values in the run logs, so an accidental
+      # print of one shows up as "***".
+      - name: Run bot
+        env:
+          PRACTICE_API_TOKEN: ${{ secrets.PRACTICE_API_TOKEN }}
+          PRACTICE_API_URL: ${{ secrets.PRACTICE_API_URL }}
+          INSTRUCTOR_ID: ${{ vars.INSTRUCTOR_ID }}
+        run: python checkin_bot.py
