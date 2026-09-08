@@ -47,7 +47,9 @@ jobs:
 
     steps:
       # Clones this repository into the runner, so the script and the
-      # workflow file itself are on disk for later steps.
+      # workflow file itself are on disk for later steps. It also leaves a
+      # short-lived GITHUB_TOKEN in .git/config, which is what lets the
+      # last step push the artifact back.
       - uses: actions/checkout@v4
 
       # Installs Python on the runner — the VM is otherwise bare.
@@ -74,3 +76,23 @@ jobs:
           PRACTICE_API_URL: ${{ secrets.PRACTICE_API_URL }}
           INSTRUCTOR_ID: ${{ vars.INSTRUCTOR_ID }}
         run: python checkin_bot.py
+
+      # The bot just wrote the instructor's latest posts and files into
+      # artifact/ — on the runner's disk, which GitHub throws away when
+      # the job ends. The assignment is graded from the repo, so this step
+      # commits the artifact folder back to main before that happens.
+      - name: Commit artifact back to the repo
+        run: |
+          # The runner has no git identity configured; give the commit the
+          # conventional bot name so history clearly shows what was
+          # automated vs. hand-pushed.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifact/
+          # A re-run where the instructor posted nothing new has nothing
+          # to commit — git exits non-zero there, which would fail the
+          # run, so catch it and let the step pass as a no-op. The
+          # [skip ci] tag also tells GitHub to never launch workflows
+          # from this push.
+          git commit -m "Update artifact: $(date -u +%Y-%m-%d) run [skip ci]" || echo "No artifact changes to commit"
+          git push

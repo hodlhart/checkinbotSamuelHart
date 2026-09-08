@@ -3,15 +3,18 @@
 # Scheduled Check-In Bot
 
 """
-Skeleton for the Scheduled Check-In Bot.
+Scheduled Check-In Bot — run by GitHub Actions (.github/workflows/checkin.yml)
+on a cron schedule. Two jobs:
 
-Run by GitHub Actions (see .github/workflows/checkin.yml) on a cron schedule.
-This first version proves the plumbing works end to end: it authenticates to
-the Practice Hub with the PRACTICE_API_TOKEN environment variable and lists
-every post written by the instructor. Collecting attachments and replying to
-check-ins get added on top of this in later steps.
+  Task 1: archive every instructor post into artifact/ (collected.json with
+          the full title/body/tags/timestamps, plus every attachment
+          downloaded into artifact/files/).
+  Task 2: reply to each check-in post inside its open window (next step).
+
+This version does Task 1 end to end.
 """
 
+import json
 import os
 import sys
 
@@ -25,6 +28,12 @@ INSTRUCTOR_ID = int(os.environ.get("INSTRUCTOR_ID", "7"))
 
 # The API serves at most 100 posts per request, so we ask for full pages.
 PAGE_SIZE = 100
+
+# Where the graded artifact lives: artifact/collected.json (all posts) and
+# artifact/files/ (one copy of every attachment). The workflow commits this
+# folder back to the repo after each run.
+ARTIFACT_DIR = "artifact"
+FILES_DIR = os.path.join(ARTIFACT_DIR, "files")
 
 
 def whoami(headers):
@@ -57,6 +66,70 @@ def list_instructor_posts(headers):
     return posts
 
 
+def get_post(headers, post_id):
+    # GET /api/v1/posts/{id} — returns that one post in full. The list
+    # endpoint is the one that could hand back truncated bodies, so every
+    # post we archive gets re-fetched on its own to guarantee the complete
+    # body made it into the artifact.
+    resp = requests.get(f"{API_URL}/api/v1/posts/{post_id}", headers=headers)
+    resp.raise_for_status()  # raise HTTPError on 4xx/5xx instead of continuing with an error response
+    return resp.json()
+
+
+def attachment_url(att):
+    # Attachment entries carry a download_url relative to the site; glue it
+    # onto the API base. An absolute URL (if the server ever sends one)
+    # passes through untouched.
+    url = att["download_url"]
+    return url if url.startswith("http") else f"{API_URL}{url}"
+
+
+def download_attachments(headers, post):
+    # GET each attachment's download_url — returns the raw file bytes with
+    # its content type, not JSON. Every file is saved under its original
+    # filename (what the graded artifact expects), writing in binary mode
+    # because the bytes could be anything (image, PDF, zip...).
+    for att in post.get("attachments", []):
+        resp = requests.get(attachment_url(att), headers=headers)
+        resp.raise_for_status()  # raise HTTPError on 4xx/5xx instead of continuing with an error response
+        with open(os.path.join(FILES_DIR, att["filename"]), "wb") as fh:
+            fh.write(resp.content)
+
+
+def save_collected_json(posts):
+    # Write the archived posts as indented JSON so the artifact is readable
+    # by the grader's script and by a human clicking around the repo.
+    # json.dump needs ensure_ascii=False to keep non-ASCII characters (an
+    # em dash in a body, say) readable instead of \u-escaped.
+    path = os.path.join(ARTIFACT_DIR, "collected.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(posts, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+
+
+def collect(headers):
+    # Task 1: archive everything the instructor has posted. The paginated
+    # list gives us the ids; each post is then re-fetched in full and its
+    # attachments pulled down. Returns the list of full post dicts that
+    # end up in collected.json.
+    os.makedirs(FILES_DIR, exist_ok=True)  # both json and downloaded files land under here
+    collected = []
+    for post in list_instructor_posts(headers):
+        # If a post is deleted between listing it and fetching it, skip it
+        # with a warning instead of failing the whole run — a fresh copy
+        # of the archive is still worth committing.
+        try:
+            full = get_post(headers, post["id"])
+        except requests.HTTPError as err:
+            print(f"  warning: post {post['id']} disappeared ({err.response.status_code}), skipping")
+            continue
+        download_attachments(headers, full)
+        collected.append(full)
+        print(f"  [{full['id']}] {full['title']} — {len(full['attachments'])} attachment(s)")
+    save_collected_json(collected)
+    return collected
+
+
 def main():
     token = os.environ.get("PRACTICE_API_TOKEN")
     if not token:
@@ -72,10 +145,12 @@ def main():
     me = whoami(headers)
     print(f"Authenticated as {me['name']} (user id {me['id']})")
 
-    posts = list_instructor_posts(headers)
-    print(f"Found {len(posts)} post(s) by instructor {INSTRUCTOR_ID}:")
-    for post in posts:
-        print(f"  [{post['id']}] {post['title']}")
+    print(f"Collecting posts by instructor {INSTRUCTOR_ID}...")
+    collected = collect(headers)
+    print(
+        f"Archived {len(collected)} post(s) to {ARTIFACT_DIR}/collected.json "
+        f"and {len(os.listdir(FILES_DIR))} file(s) to {FILES_DIR}/"
+    )
 
 
 if __name__ == "__main__":
