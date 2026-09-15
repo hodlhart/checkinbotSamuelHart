@@ -11,11 +11,11 @@ A Python program that GitHub Actions runs on a schedule. It talks to the INF601 
 
 The bot runs on GitHub's servers via a cron schedule (see `.github/workflows/checkin.yml`): hourly, plus an extra pass every second hour. Each run does two things:
 
-**Task 1 — Collect everything the instructor posts.** The bot pages through all posts authored by the instructor (user id 7), re-fetches each one in full so no body text is ever truncated, and saves the complete post data (titles, bodies, tags, timestamps) to `artifact/collected.json`. Every attached file on every post is downloaded byte-for-byte into `artifact/files/`, saved as `{post_id}_{filename}` so same-named attachments on different posts can't overwrite each other. The workflow then commits the `artifact/` folder back to this repository, so the archive is always reviewable here.
+**Task 1: collect everything the instructor posts.** The bot pages through all posts authored by the instructor (user id 7), re-fetches each one in full so no body text is ever truncated, and saves the complete post data (titles, bodies, tags, timestamps) to `artifact/collected.json`. Every attached file on every post is downloaded byte-for-byte into `artifact/files/`, saved as `{post_id}_{filename}` so same-named attachments on different posts can't overwrite each other. The workflow then commits the `artifact/` folder back to this repository, so the archive is always reviewable here.
 
-**Task 2 — Reply to each check-in, on time.** Some instructor posts are "check-ins" — recognizable because the title contains the word "check-in" (matched as a whole word, singular or plural, case-insensitive, so ordinary posts can't be mistaken for one). Check-ins only accept replies during a limited time window enforced by the server; reply too early or too late and the API returns `423 Locked` and nothing is saved. The bot replies to each check-in it hasn't already answered (it checks existing comments first, so re-runs never double-post), treats a closed window as routine — it just waits for the next scheduled run — and replies with a short message identifying both the student and the bot.
+**Task 2: reply to each check-in, on time.** Some instructor posts are "check-ins", recognizable because the title contains the word "check-in" (matched as a whole word, singular or plural, case-insensitive, so ordinary posts can't be mistaken for one). Check-ins only accept replies during a limited time window enforced by the server; reply too early or too late and the API returns `423 Locked` and nothing is saved. The bot replies to each check-in it hasn't already answered (it checks existing comments first, so re-runs never double-post), treats a closed window as routine (it just waits for the next scheduled run) and replies with a short message identifying both the student and the bot.
 
-Robustness details worth knowing: every API call has a 30-second timeout so a hung server can't stall the run, a concurrency guard keeps overlapping runs from racing on the same git push (a queued run waits rather than cancelling the one in flight, so no run's chance at a reply window is thrown away), the commit-back step rebases on the remote before pushing so a moved branch can't cause a rejected push, and a run where nothing changed completes as a green no-op instead of a failure. Each run also wipes `artifact/files/` and regenerates it from scratch, so the artifact always mirrors the instructor's currently visible posts exactly — an attachment whose post was deleted doesn't linger.
+Robustness details worth knowing: every API call has a 30-second timeout so a hung server can't stall the run, a concurrency guard keeps overlapping runs from racing on the same git push (a queued run waits rather than cancelling the one in flight, so no run's chance at a reply window is thrown away), the commit-back step rebases on the remote before pushing so a moved branch can't cause a rejected push, and a run where nothing changed completes as a green no-op instead of a failure. Each run also wipes `artifact/files/` and regenerates it from scratch, so the artifact always mirrors the instructor's currently visible posts exactly, and an attachment whose post was deleted doesn't linger.
 
 ## Getting Started
 
@@ -64,7 +64,7 @@ export PRACTICE_API_TOKEN="your-token-here"
 python checkin_bot.py
 ```
 
-* On GitHub: the workflow runs automatically — hourly at minute 17 UTC, plus an extra pass at minute 41 of every second hour. Both are off-peak minutes, because GitHub's on-the-hour slots are crowded and get delayed first, and GitHub can drop requested runs entirely under heavy load, so the extra passes act as slack. To run it by hand, go to the **Actions** tab → **Scheduled Check-In Bot** → **Run workflow**, or from the terminal with the GitHub CLI:
+* On GitHub: the workflow runs automatically, hourly at minute 17 UTC, plus an extra pass at minute 41 of every second hour. Both are off-peak minutes, because GitHub's on-the-hour slots are crowded and get delayed first, and GitHub can drop requested runs entirely under heavy load, so the extra passes act as slack. To run it by hand, go to the **Actions** tab → **Scheduled Check-In Bot** → **Run workflow**, or from the terminal with the GitHub CLI:
 
 ```
 gh workflow run checkin.yml
@@ -83,18 +83,20 @@ Replied to 0 check-in(s) this run
 
 ## Help
 
-* `PRACTICE_API_TOKEN is not set — cannot authenticate.` — the token environment variable is missing; export it locally or add it as a repository secret.
-* `window closed (423), will retry next run` — the check-in's reply window is shut right now; this is normal, and the next scheduled run retries.
-* `already replied, skipping` — the bot found its own earlier comment on that check-in, so it does not double-post.
-* `! [rejected] main -> main (fetch first)` during a manual re-run of an old run — fixed by the rebase-before-push in the commit-back step; if you see it, the workflow file predates that fix.
-* `No artifact changes to commit` in a run log is not a failure — it means the instructor posted nothing new since the last run.
+* `PRACTICE_API_TOKEN is not set; cannot authenticate.` The token environment variable is missing, so export it locally or add it as a repository secret.
+* `window closed (423), will retry next run` means the check-in's reply window is shut right now. That is normal, and the next scheduled run retries.
+* `already replied, skipping` means the bot found its own earlier comment on that check-in, so it does not double-post.
+* `! [rejected] main -> main (fetch first)` during a manual re-run of an old run is fixed by the rebase-before-push in the commit-back step. If you see it, the workflow file predates that fix.
+* `No artifact changes to commit` in a run log is not a failure. It means the instructor posted nothing new since the last run.
 
 ## Authors
 
-Samuel Hart — [@hodlhart](https://github.com/hodlhart)
+Samuel Hart, [@hodlhart](https://github.com/hodlhart)
 
 ## Version History
 
+* 0.3
+    * Schedule reliability: added an hourly cron line alongside the two-hourly one, because GitHub delayed or dropped about 57% of the requested runs, and stopped cancelling an in-flight run when the next tick arrives
 * 0.2
     * Task 2: check-in detection, in-window replies, duplicate and 423 handling
     * Review fixes: request timeouts, concurrency guard, unique attachment names, job timeout, word-boundary matching, plural check-in titles, per-reply error isolation, rebase-before-push
@@ -113,4 +115,4 @@ This project is coursework for INF601 and is not licensed for reuse.
 ## AI Usage
 
 * **Claude Code** wrote all of the code: the bot skeleton, the Task 1 collection logic, the Task 2 reply logic, and the GitHub Actions workflow. Each piece was built from written prompts specifying the requirements, and every file change was reviewed and approved through permission prompts. Three rounds of code review produced most of the hardening: request timeouts, a run-concurrency guard, unique attachment filenames, and a job timeout; then word-boundary check-in matching, per-reply error isolation, and a race-window note; and finally a rebase-before-push fix for a rejected-push failure. Claude Code also flagged on its own that the word-boundary pattern would miss plural titles like "weekly check-ins", which became the `s?` plural-match fix.
-* **I (Sam Hart)** reviewed each piece against the assignment rubric, verified the GitHub Actions runs, and relayed the review findings back to Claude Code for implementation. I set up the GitHub repository and authentication, configured the three Actions secrets and variables, triggered and verified every workflow run, and stress-tested the workflow by re-running completed runs — which surfaced the push-rejection failure that became the rebase fix.
+* **I (Sam Hart)** reviewed each piece against the assignment rubric, verified the GitHub Actions runs, and relayed the review findings back to Claude Code for implementation. I set up the GitHub repository and authentication, configured the three Actions secrets and variables, triggered and verified every workflow run, and stress-tested the workflow by re-running completed runs, which surfaced the push-rejection failure that became the rebase fix.

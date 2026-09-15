@@ -3,13 +3,13 @@
 # Scheduled Check-In Bot
 
 """
-Scheduled Check-In Bot — run by GitHub Actions (.github/workflows/checkin.yml)
+Scheduled Check-In Bot, run by GitHub Actions (.github/workflows/checkin.yml)
 on a cron schedule. Two jobs:
 
   Task 1: archive every instructor post into artifact/ (collected.json with
           the full title/body/tags/timestamps, plus every attachment
           downloaded into artifact/files/).
-  Task 2: reply to each of the instructor's check-in posts — but only inside
+  Task 2: reply to each of the instructor's check-in posts, but only inside
           the server-enforced reply window, and only once per check-in.
 
 Both tasks run on every schedule tick.
@@ -40,19 +40,19 @@ FILES_DIR = os.path.join(ARTIFACT_DIR, "files")
 
 
 def whoami(headers):
-    # GET /api/v1/me — returns the account that owns the token. One cheap
+    # GET /api/v1/me. Returns the account that owns the token: one cheap
     # call to prove auth works before we try anything else.
-    # Every call in this file passes timeout=30 — without it a hung API
-    # would stall the run until the job's own timeout kills it.
+    # Every call in this file passes timeout=30, because without it a hung
+    # API would stall the run until the job's own timeout kills it.
     resp = requests.get(f"{API_URL}/api/v1/me", headers=headers, timeout=30)
     resp.raise_for_status()  # raise HTTPError on 4xx/5xx instead of continuing with an error response
     return resp.json()
 
 
 def list_instructor_posts(headers):
-    # GET /api/v1/posts?author=... — returns the instructor's posts as a
-    # JSON list, newest first. The endpoint only serves one page at a time,
-    # so we walk it with offset until a page comes back short.
+    # GET /api/v1/posts?author=... Returns the instructor's posts as a JSON
+    # list, newest first. The endpoint only serves one page at a time, so we
+    # walk it with offset until a page comes back short.
     posts = []
     offset = 0
     while True:
@@ -73,7 +73,7 @@ def list_instructor_posts(headers):
 
 
 def get_post(headers, post_id):
-    # GET /api/v1/posts/{id} — returns that one post in full. The list
+    # GET /api/v1/posts/{id}. Returns that one post in full. The list
     # endpoint is the one that could hand back truncated bodies, so every
     # post we archive gets re-fetched on its own to guarantee the complete
     # body made it into the artifact.
@@ -83,7 +83,7 @@ def get_post(headers, post_id):
 
 
 def attachment_url(att):
-    # Attachment entries carry a download_url relative to the site; glue it
+    # Attachment entries carry a download_url relative to the site, so glue it
     # onto the API base. An absolute URL (if the server ever sends one)
     # passes through untouched.
     url = att["download_url"]
@@ -91,7 +91,7 @@ def attachment_url(att):
 
 
 def download_attachments(headers, post):
-    # GET each attachment's download_url — returns the raw file bytes with
+    # GET each attachment's download_url, which returns the raw file bytes with
     # its content type, not JSON. Writing in binary mode because the bytes
     # could be anything (image, PDF, zip...). Each file is saved as
     # {post_id}_{filename}: the post-id prefix keeps same-named attachments
@@ -108,8 +108,8 @@ def download_attachments(headers, post):
 def save_collected_json(posts):
     # Write the archived posts as indented JSON so the artifact is readable
     # by the grader's script and by a human clicking around the repo.
-    # json.dump needs ensure_ascii=False to keep non-ASCII characters (an
-    # em dash in a body, say) readable instead of \u-escaped.
+    # json.dump needs ensure_ascii=False to keep non-ASCII characters (a
+    # curly quote in a body, say) readable instead of \u-escaped.
     path = os.path.join(ARTIFACT_DIR, "collected.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(posts, fh, indent=2, ensure_ascii=False)
@@ -130,7 +130,7 @@ def collect(headers):
     collected = []
     for post in list_instructor_posts(headers):
         # If a post is deleted between listing it and fetching it, skip it
-        # with a warning instead of failing the whole run — a fresh copy
+        # with a warning instead of failing the whole run, since a fresh copy
         # of the archive is still worth committing.
         try:
             full = get_post(headers, post["id"])
@@ -139,14 +139,14 @@ def collect(headers):
             continue
         download_attachments(headers, full)
         collected.append(full)
-        print(f"  [{full['id']}] {full['title']} — {len(full['attachments'])} attachment(s)")
+        print(f"  [{full['id']}] {full['title']}: {len(full['attachments'])} attachment(s)")
     save_collected_json(collected)
     return collected
 
 
 # What the bot says when it checks in. Short and clearly automated, so the
 # instructor tallying replies knows a real student's bot wrote it.
-REPLY_TEXT = "Checked in — Samuel Hart (posted by my scheduled check-in bot)."
+REPLY_TEXT = "Checked in: Samuel Hart (posted by my scheduled check-in bot)."
 
 # Compiled once at import; is_check_in() runs it against every post title
 # on every run. The s? makes the trailing s optional, so plural titles
@@ -158,13 +158,13 @@ def is_check_in(post):
     # A check-in is recognized purely by its title: the word "check-in"
     # (or its plural "check-ins") somewhere in it, e.g. "Aug 21th check-in"
     # or "check-in for Sept 8". The \b word boundaries mean only the whole
-    # word matches — a title like "check-index for class" is NOT a
-    # check-in — and IGNORECASE covers "Check-In", "CHECK-IN", etc.
+    # word matches, so a title like "check-index for class" is NOT a
+    # check-in. IGNORECASE covers "Check-In", "CHECK-IN", and so on.
     return CHECK_IN_PATTERN.search(post["title"]) is not None
 
 
 def list_comments(headers, post_id):
-    # GET /api/v1/posts/{id}/comments — returns that post's comments as a
+    # GET /api/v1/posts/{id}/comments. Returns that post's comments as a
     # JSON list, oldest first.
     resp = requests.get(f"{API_URL}/api/v1/posts/{post_id}/comments", headers=headers, timeout=30)
     resp.raise_for_status()  # raise HTTPError on 4xx/5xx instead of continuing with an error response
@@ -173,22 +173,22 @@ def list_comments(headers, post_id):
 
 def already_replied(comments, my_id):
     # True if one of the existing comments was written by us. The bot runs
-    # every couple of hours, so without this check a re-run would reply to
-    # the same check-in twice.
+    # every hour, so without this check a re-run would reply to the same
+    # check-in twice.
     return any(comment.get("author_id") == my_id for comment in comments)
 
 
 def reply_to_check_in(headers, post, my_id):
-    # POST /api/v1/posts/{id}/comments — adds a comment; the server answers
+    # POST /api/v1/posts/{id}/comments. Adds a comment; the server answers
     # 201 on success. Returns True only when a new reply actually landed.
     #
     # Known race: another process could post a reply between the duplicate
     # check below and our POST, and we would end up commenting twice. That
-    # is acceptable — the workflow's concurrency group means two of our runs
+    # is acceptable. The workflow's concurrency group means two of our runs
     # never actually overlap, and the next run's already_replied check is
     # the safety net that keeps any slip from repeating.
     if already_replied(list_comments(headers, post["id"]), my_id):
-        print(f"  [{post['id']}] {post['title']} — already replied, skipping")
+        print(f"  [{post['id']}] {post['title']}: already replied, skipping")
         return False
 
     resp = requests.post(
@@ -200,12 +200,12 @@ def reply_to_check_in(headers, post, my_id):
     if resp.status_code == 423:
         # 423 Locked: this check-in only accepts replies inside a time
         # window, and it is shut right now (too early or too late). That
-        # is routine — not a failure — so leave the run green and let the
-        # next scheduled run catch the window open instead.
-        print(f"  [{post['id']}] {post['title']} — window closed (423), will retry next run")
+        # is routine rather than a failure, so leave the run green and let
+        # the next scheduled run catch the window open instead.
+        print(f"  [{post['id']}] {post['title']}: window closed (423), will retry next run")
         return False
     resp.raise_for_status()  # any other 4xx/5xx IS a real failure
-    print(f"  [{post['id']}] {post['title']} — replied")
+    print(f"  [{post['id']}] {post['title']}: replied")
     return True
 
 
@@ -226,17 +226,17 @@ def handle_check_ins(headers, posts, my_id):
             if reply_to_check_in(headers, post, my_id):
                 replied += 1
         except requests.RequestException as err:
-            print(f"  [{post['id']}] {post['title']} — reply failed, skipping: {err}")
+            print(f"  [{post['id']}] {post['title']}: reply failed, skipping: {err}")
     return replied
 
 
 def main():
     token = os.environ.get("PRACTICE_API_TOKEN")
     if not token:
-        # Missing token is a setup error, not a normal failure — exit
-        # non-zero so the Actions run shows red instead of silently
+        # Missing token is a setup error, not a normal failure, so exit
+        # non-zero to make the Actions run show red instead of silently
         # doing nothing.
-        print("PRACTICE_API_TOKEN is not set — cannot authenticate.")
+        print("PRACTICE_API_TOKEN is not set; cannot authenticate.")
         sys.exit(1)
 
     # Every request this bot makes carries the token in this header.

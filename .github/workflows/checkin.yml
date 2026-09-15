@@ -18,7 +18,7 @@ on:
     # "17 * * * *"   = minute 17, every hour, every day of every month.
     #
     # Why two lines: check-in posts only accept replies inside a time
-    # window, and the API never tells us when that window opens — it just
+    # window, and the API never tells us when that window opens. It just
     # rejects replies with 423 when it is closed. Running often means the
     # bot never goes long without looking, so any window longer than the
     # gap between runs is caught.
@@ -35,12 +35,12 @@ on:
     # same clocks, so :00 minutes are crowded and delayed first.
     #
     # (UTC is 5-6 hours ahead of Central time, so these fire at odd local
-    # hours — that is fine, the bot does the checking for us.)
+    # hours. That is fine: the bot does the checking for us.)
     - cron: "41 */2 * * *"
     - cron: "17 * * * *"
 
   # `workflow_dispatch` adds a "Run workflow" button on the Actions tab,
-  # so the same job can also be started by hand — for testing a change
+  # so the same job can also be started by hand, for testing a change
   # without waiting for the next scheduled slot.
   workflow_dispatch:
 
@@ -51,7 +51,7 @@ permissions:
 
 # Only one run of this workflow may be active at a time. Without this,
 # a delayed cron run could overlap a manual one, and both would try to
-# git push the artifact/ folder — the loser's push would fail the run.
+# git push the artifact/ folder, and the loser's push would fail the run.
 # Any run queued behind the active one waits its turn. Cancelling the
 # in-flight run is deliberately NOT enabled: with an hourly line, the
 # next tick can arrive while a slow run is still going, and every run
@@ -65,7 +65,7 @@ jobs:
   checkin:
     # GitHub-hosted virtual machine the steps below run on.
     runs-on: ubuntu-latest
-    # Hard stop for the whole job — every HTTP call in the bot has its own
+    # Hard stop for the whole job. Every HTTP call in the bot has its own
     # 30-second timeout, but this is the backstop so a wedged run can
     # never sit on a runner indefinitely.
     timeout-minutes: 10
@@ -77,7 +77,7 @@ jobs:
       # last step push the artifact back.
       - uses: actions/checkout@v4
 
-      # Installs Python on the runner — the VM is otherwise bare.
+      # Installs Python on the runner. The VM is otherwise bare.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -87,7 +87,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      # Runs the bot. The secrets never appear in this file — they are
+      # Runs the bot. The secrets never appear in this file. They are
       # stored under Settings → Secrets and variables → Actions, and
       # `${{ secrets.NAME }}` substitutes them in only at run time.
       # Mapping them into `env:` hands them to the script the same way
@@ -103,7 +103,7 @@ jobs:
         run: python checkin_bot.py
 
       # The bot just wrote the instructor's latest posts and files into
-      # artifact/ — on the runner's disk, which GitHub throws away when
+      # artifact/, on the runner's disk, which GitHub throws away when
       # the job ends. The assignment is graded from the repo, so this step
       # commits the artifact folder back to main before that happens.
       - name: Commit artifact back to the repo
@@ -117,7 +117,7 @@ jobs:
 
           # A re-run where the instructor posted nothing new has nothing
           # staged. git diff --staged --quiet exits 0 exactly then, so
-          # skip the commit AND the push — a clean run should leave the
+          # skip the commit AND the push, since a clean run should leave the
           # repo untouched instead of pushing a no-op.
           if git diff --staged --quiet; then
             echo "No artifact changes to commit"
@@ -126,15 +126,15 @@ jobs:
 
           git commit -m "Update artifact: $(date -u +%Y-%m-%d) run [skip ci]"
 
-          # main may have moved since our checkout — a hand-pushed commit,
+          # main may have moved since our checkout: a hand-pushed commit,
           # or an artifact commit from a run that finished while this one
           # was waiting on the concurrency group. Replaying our one
           # artifact commit on top of the latest remote state is what
           # makes the push below land instead of being rejected with
           # "fetch first".
           if ! git pull --rebase origin main; then
-            # A conflict can only be inside artifact/ — the only path the
-            # bot ever commits — and this run regenerated the whole
+            # A conflict can only be inside artifact/, the only path the
+            # bot ever commits, and this run regenerated the whole
             # folder, so our copy is the freshest. Undo the tangled
             # rebase, snap to the latest remote state, and replace its
             # artifact with an exact copy of ours before committing again.
