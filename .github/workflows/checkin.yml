@@ -15,20 +15,29 @@ on:
     # GitHub cron expressions have five fields, all in UTC:
     #   minute  hour  day-of-month  month  day-of-week
     # "41 */2 * * *" = minute 41, every 2nd hour, every day of every month.
+    # "17 * * * *"   = minute 17, every hour, every day of every month.
     #
-    # Why every 2 hours: check-in posts only accept replies inside a time
+    # Why two lines: check-in posts only accept replies inside a time
     # window, and the API never tells us when that window opens — it just
     # rejects replies with 423 when it is closed. Running often means the
-    # bot never goes more than ~2 hours without looking, so any window
-    # longer than that is guaranteed to be caught.
+    # bot never goes long without looking, so any window longer than the
+    # gap between runs is caught.
     #
-    # Why minute 41 and not 0: GitHub runs every user's cron on the same
-    # clocks, so :00 minutes are crowded and delayed. An off-peak minute
-    # makes delayed starts less likely.
+    # GitHub's docs warn that schedule events are delayed under load and
+    # that "some queued jobs may be dropped" when load is high enough.
+    # Measured over the first six days, only 33 of 76 requested runs
+    # actually started (43%), leaving intervals averaging 4.5 hours
+    # against the 2 hours this schedule asks for. The hourly line adds
+    # attempts so a dropped run costs less, and the two lines use
+    # different minutes so they rarely queue up together.
+    #
+    # Why off-peak minutes and not 0: GitHub runs every user's cron on the
+    # same clocks, so :00 minutes are crowded and delayed first.
     #
     # (UTC is 5-6 hours ahead of Central time, so these fire at odd local
     # hours — that is fine, the bot does the checking for us.)
     - cron: "41 */2 * * *"
+    - cron: "17 * * * *"
 
   # `workflow_dispatch` adds a "Run workflow" button on the Actions tab,
   # so the same job can also be started by hand — for testing a change
@@ -43,12 +52,14 @@ permissions:
 # Only one run of this workflow may be active at a time. Without this,
 # a delayed cron run could overlap a manual one, and both would try to
 # git push the artifact/ folder — the loser's push would fail the run.
-# Any run queued behind the active one waits its turn; cancel-in-progress
-# goes further and stops a run that is mid-flight when a newer one starts,
-# so the newest run's data is what gets committed.
+# Any run queued behind the active one waits its turn. Cancelling the
+# in-flight run is deliberately NOT enabled: with an hourly line, the
+# next tick can arrive while a slow run is still going, and every run
+# that gets cancelled is a lost chance to catch a reply window. Runs
+# finish in well under a minute, so waiting is cheap.
 concurrency:
   group: checkin
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   checkin:

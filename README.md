@@ -9,13 +9,13 @@ A Python program that GitHub Actions runs on a schedule. It talks to the INF601 
 
 ## Description
 
-The bot runs every two hours on GitHub's servers via a cron schedule (see `.github/workflows/checkin.yml`). Each run does two things:
+The bot runs on GitHub's servers via a cron schedule (see `.github/workflows/checkin.yml`): hourly, plus an extra pass every second hour. Each run does two things:
 
 **Task 1 — Collect everything the instructor posts.** The bot pages through all posts authored by the instructor (user id 7), re-fetches each one in full so no body text is ever truncated, and saves the complete post data (titles, bodies, tags, timestamps) to `artifact/collected.json`. Every attached file on every post is downloaded byte-for-byte into `artifact/files/`, saved as `{post_id}_{filename}` so same-named attachments on different posts can't overwrite each other. The workflow then commits the `artifact/` folder back to this repository, so the archive is always reviewable here.
 
 **Task 2 — Reply to each check-in, on time.** Some instructor posts are "check-ins" — recognizable because the title contains the word "check-in" (matched as a whole word, singular or plural, case-insensitive, so ordinary posts can't be mistaken for one). Check-ins only accept replies during a limited time window enforced by the server; reply too early or too late and the API returns `423 Locked` and nothing is saved. The bot replies to each check-in it hasn't already answered (it checks existing comments first, so re-runs never double-post), treats a closed window as routine — it just waits for the next scheduled run — and replies with a short message identifying both the student and the bot.
 
-Robustness details worth knowing: every API call has a 30-second timeout so a hung server can't stall the run, a concurrency guard cancels overlapping runs so two workflows never race on the same git push, the commit-back step rebases on the remote before pushing so a moved branch can't cause a rejected push, and a run where nothing changed completes as a green no-op instead of a failure. Each run also wipes `artifact/files/` and regenerates it from scratch, so the artifact always mirrors the instructor's currently visible posts exactly — an attachment whose post was deleted doesn't linger.
+Robustness details worth knowing: every API call has a 30-second timeout so a hung server can't stall the run, a concurrency guard keeps overlapping runs from racing on the same git push (a queued run waits rather than cancelling the one in flight, so no run's chance at a reply window is thrown away), the commit-back step rebases on the remote before pushing so a moved branch can't cause a rejected push, and a run where nothing changed completes as a green no-op instead of a failure. Each run also wipes `artifact/files/` and regenerates it from scratch, so the artifact always mirrors the instructor's currently visible posts exactly — an attachment whose post was deleted doesn't linger.
 
 ## Getting Started
 
@@ -64,7 +64,7 @@ export PRACTICE_API_TOKEN="your-token-here"
 python checkin_bot.py
 ```
 
-* On GitHub: the workflow runs automatically every two hours (minute 41 of every 2nd hour UTC — an off-peak minute, because GitHub's on-the-hour slots are crowded and get delayed). To run it by hand, go to the **Actions** tab → **Scheduled Check-In Bot** → **Run workflow**, or from the terminal with the GitHub CLI:
+* On GitHub: the workflow runs automatically — hourly at minute 17 UTC, plus an extra pass at minute 41 of every second hour. Both are off-peak minutes, because GitHub's on-the-hour slots are crowded and get delayed first, and GitHub can drop requested runs entirely under heavy load, so the extra passes act as slack. To run it by hand, go to the **Actions** tab → **Scheduled Check-In Bot** → **Run workflow**, or from the terminal with the GitHub CLI:
 
 ```
 gh workflow run checkin.yml
