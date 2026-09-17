@@ -14,30 +14,31 @@ on:
   schedule:
     # GitHub cron expressions have five fields, all in UTC:
     #   minute  hour  day-of-month  month  day-of-week
-    # "41 */2 * * *" = minute 41, every 2nd hour, every day of every month.
-    # "17 * * * *"   = minute 17, every hour, every day of every month.
+    # "17 */3 * * *" = minute 17 of every 3rd hour: 0, 3, 6, 9, 12, 15, 18
+    # and 21 UTC. Eight passes a day.
     #
-    # Why two lines: check-in posts only accept replies inside a time
-    # window, and the API never tells us when that window opens. It just
-    # rejects replies with 423 when it is closed. Running often means the
-    # bot never goes long without looking, so any window longer than the
-    # gap between runs is caught.
+    # Why several passes a day: a check-in accepts replies only on its own
+    # day, and the API says nothing about when that window opens. It just
+    # answers 423 when it is shut. Runs every few hours mean any window is
+    # caught, and one dropped run costs hours rather than a day.
     #
-    # GitHub's docs warn that schedule events are delayed under load and
-    # that "some queued jobs may be dropped" when load is high enough.
-    # Measured over the first six days, only 33 of 76 requested runs
-    # actually started (43%), leaving intervals averaging 4.5 hours
-    # against the 2 hours this schedule asks for. The hourly line adds
-    # attempts so a dropped run costs less, and the two lines use
-    # different minutes so they rarely queue up together.
+    # Why not fewer: the course guidance is two or three runs a day, which
+    # is plenty on its own, but GitHub delays and drops scheduled runs
+    # often. Measured across this repository's first ten days, roughly half
+    # of all requested runs never started. Eight requests leave margin
+    # without any single run being load-bearing.
     #
-    # Why off-peak minutes and not 0: GitHub runs every user's cron on the
-    # same clocks, so :00 minutes are crowded and delayed first.
+    # Why this avoids 04:00-06:00 UTC: the assignment asks us not to
+    # schedule there (11 PM to 1 AM Central), because a late run can slip
+    # past midnight and miss a day. Three-hour spacing skips that block for
+    # free, since 4 and 5 are not multiples of three.
+    #
+    # Why minute 17 and not 0: GitHub runs every user's cron on the same
+    # clocks, so :00 minutes are crowded and delayed first.
     #
     # (UTC is 5-6 hours ahead of Central time, so these fire at odd local
     # hours. That is fine: the bot does the checking for us.)
-    - cron: "41 */2 * * *"
-    - cron: "17 * * * *"
+    - cron: "17 */3 * * *"
 
   # `workflow_dispatch` adds a "Run workflow" button on the Actions tab,
   # so the same job can also be started by hand, for testing a change

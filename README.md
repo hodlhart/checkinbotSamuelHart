@@ -9,7 +9,7 @@ A Python program that GitHub Actions runs on a schedule. It talks to the INF601 
 
 ## Description
 
-The bot runs on GitHub's servers via a cron schedule (see `.github/workflows/checkin.yml`): hourly, plus an extra pass every second hour. Each run does two things:
+The bot runs on GitHub's servers via a cron schedule (see `.github/workflows/checkin.yml`): every three hours, eight passes a day. Each run does two things:
 
 **Task 1: collect everything the instructor posts.** The bot pages through all posts authored by the instructor (user id 7), re-fetches each one in full so no body text is ever truncated, and saves the complete post data (titles, bodies, tags, timestamps) to `artifact/collected.json`. Every attached file on every post is downloaded byte-for-byte into `artifact/files/`, saved as `{post_id}_{filename}` so same-named attachments on different posts can't overwrite each other. The workflow then commits the `artifact/` folder back to this repository, so the archive is always reviewable here.
 
@@ -64,7 +64,7 @@ export PRACTICE_API_TOKEN="your-token-here"
 python checkin_bot.py
 ```
 
-* On GitHub: the workflow runs automatically, hourly at minute 17 UTC, plus an extra pass at minute 41 of every second hour. Both are off-peak minutes, because GitHub's on-the-hour slots are crowded and get delayed first, and GitHub can drop requested runs entirely under heavy load, so the extra passes act as slack. To run it by hand, go to the **Actions** tab → **Scheduled Check-In Bot** → **Run workflow**, or from the terminal with the GitHub CLI:
+* On GitHub: the workflow runs automatically at minute 17 of every third hour UTC (0, 3, 6, 9, 12, 15, 18, 21). That spacing deliberately skips 04:00 to 06:00 UTC, which is 11 PM to 1 AM Central: the assignment asks for no runs there, since a late one could slip past midnight and miss a day's window. Minute 17 rather than 0 avoids GitHub's crowded on-the-hour slots. The eight daily passes are margin, since GitHub drops a share of requested runs. To run it by hand, go to the **Actions** tab → **Scheduled Check-In Bot** → **Run workflow**, or from the terminal with the GitHub CLI:
 
 ```
 gh workflow run checkin.yml
@@ -95,6 +95,8 @@ Samuel Hart, [@hodlhart](https://github.com/hodlhart)
 
 ## Version History
 
+* 0.4
+    * Schedule set to every three hours, which skips the 04:00 to 06:00 UTC block the assignment asks us to avoid while keeping eight passes a day as margin for dropped runs
 * 0.3
     * Schedule reliability: added an hourly cron line alongside the two-hourly one, because GitHub delayed or dropped about 57% of the requested runs, and stopped cancelling an in-flight run when the next tick arrives
 * 0.2
